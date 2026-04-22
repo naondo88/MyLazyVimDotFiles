@@ -70,7 +70,8 @@ the parser-install dir alone). 94 lines.
 
 ## Meta files (non-config)
 
-- `MATHEMATICA_LSP.md` — original planning doc for the Wolfram LSP setup.
+- `MATHEMATICA_LSP.md` — operational notes for the implemented Wolfram
+  filetype, Tree-sitter, and LSP setup.
 - `MODS.md` — this file.
 - `.codex` — empty marker file (Codex CLI sentinel).
 

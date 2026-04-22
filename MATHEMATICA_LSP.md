@@ -1,86 +1,126 @@
-Here is a high-level implementation plan you can hand to a coding agent.
+# Wolfram Language Support
 
-## Goal
+This config supports Wolfram Language files through
+`lua/plugins/wolfram.lua`. The setup is intentionally local to this
+Neovim config and does not rely on Mason for the Wolfram LSP server.
 
-Set up **Wolfram Language support in Neovim/LazyVim** with:
+## Filetypes
 
-1. basic filetype and syntax support,
-2. optional Tree-sitter highlighting if available,
-3. native Neovim LSP integration for the **official Wolfram LSP server**,
-4. a clean separation between:
+- `.wl` files are treated as `wolfram`.
+- `.wls` files are treated as `wolfram`.
+- `.m` files are only treated as `wolfram` when the first ten lines
+  contain a Mathematica package marker:
+  - `BeginPackage[`
+  - `::Package::`
 
-   * **editor tooling**,
-   * **Wolfram kernel / LSP startup**, and
-   * **project-local Mathematica packages** stored under `middleware/<package>`.
+That content check avoids taking over MATLAB or Objective-C `.m` files.
 
-Assume the agent may web search for exact package names, current APIs, and current LazyVim / `nvim-lspconfig` conventions.
+## Tree-sitter
 
----
+Wolfram highlighting uses `LumaKernel/tree-sitter-wolfram`, pinned to:
 
-## Key facts already established
+```text
+ab3506a5b49b7d76a8ed06958d0b2b7be91a5d34
+```
 
-### Wolfram LSP
+The parser is registered manually with `nvim-treesitter` because it is
+not part of the default parser registry. It is also re-registered on the
+`User TSUpdate` event because nvim-treesitter reloads its parser table
+during updates.
 
-* The official Wolfram LSP exists.
-* It is not typically a standard Mason one-click server.
-* It is usually launched by starting the **Wolfram kernel** and loading the `LSPServer` paclet.
-* Since the installed Wolfram Engine is `14.3`, the necessary LSP-related paclets are likely already present, but the agent should still verify that they can actually be loaded.
+The parser repo does not expose its highlight queries where Neovim picks
+them up from the parser install directory, so this config carries a copy
+at:
 
-### Mason / LazyVim / lspconfig
+```text
+queries/wolfram/highlights.scm
+```
 
-* **Mason** is a tool installer and package manager for editor tooling.
-* **mason-lspconfig.nvim** bridges Mason-installed servers into Neovim LSP setup.
-* **LazyVim** is a higher-level orchestration layer over Neovim plugins and typically configures LSP through `nvim-lspconfig`.
-* Mason only helps automatically when a server is represented in Mason’s registry and can be installed as a normal managed tool.
-* Wolfram LSP likely needs **manual `lspconfig` wiring**, because the real server entrypoint is a Wolfram kernel invocation rather than a standard standalone binary.
+LazyVim installs the parser because `wolfram` is appended to
+`nvim-treesitter`'s `ensure_installed` list.
 
-### Local Mathematica packages
+## LSP
 
-* Project-specific Mathematica / Wolfram packages are stored locally under:
-  `middleware/<mathematica-package>`
-* Example location:
-  `~/Git/AgenticMathSolver/middleware/`
-* The agent should therefore think about **project-local package discovery / `$Path` augmentation**, not global paclet installation for those local packages.
+The Wolfram LSP is registered manually through `nvim-lspconfig` as a
+server named `wolfram`. It is not installed by Mason.
 
----
+The server command is:
 
-## Deliverables
+```text
+WolframKernel -noinit -noprompt -nopaclet -nostartuppaclets -noicon -run 'Needs["LSPServer`"]; LSPServer`StartServer[]'
+```
 
-The coding agent should aim to produce:
+When a project has a `middleware/` directory at the detected root, the
+command prepends that directory to `$Path` before starting the server:
 
-1. a working Neovim/LazyVim configuration for Wolfram files,
-2. a native LSP config for the official Wolfram LSP,
-4. a project-local Wolfram package path strategy for `middleware/*`,
-5. a short verification checklist,
-6. notes on caveats and fallback options.
+```text
+PrependTo[$Path, "<root>/middleware"]; Needs["LSPServer`"]; LSPServer`StartServer[]
+```
 
+This lets project-local Wolfram packages under `middleware/` be found by
+the kernel-backed language server.
 
-1. **What exists already**
+## Project Roots
 
-   * Wolfram Engine present
-   * official Wolfram LSP likely present
-   * Mason exists with NeoVim and a LazyVim installation
+The root detector walks upward from the opened file and chooses the first
+directory containing either:
 
-2. **Architecture**
+- `middleware/`
+- `.git/`
 
-   * LazyVim
-   * Mason
-   * mason-lspconfig
-   * nvim-lspconfig
-   * Wolfram kernel startup model
-   * local `middleware/*` package path model
+If neither exists, it falls back to the file's directory. Single-file
+support is enabled.
 
-3. **Implementation steps**
+## Neovim 0.12 Compatibility
 
-   * filetype
-   * syntax / Tree-sitter
-   * manual LSP registration
-   * project-root handling
-   * middleware package path bootstrap
-   * verification
+The Wolfram LSPServer reports `semanticTokensProvider` as JSON null in a
+way that can crash Neovim 0.12's semantic-token client. The config clears
+that capability in `on_attach`:
 
----
+```lua
+client.server_capabilities.semanticTokensProvider = nil
+```
 
-## One-sentence summary for the agent
+## Requirements
 
-Implement Wolfram support in LazyVim by treating the official Wolfram LSP as a **manual kernel-launched `lspconfig` server**, not a normal Mason-managed server, and make project-local Mathematica packages under `middleware/*` discoverable through explicit project-root-relative path bootstrapping.
+- `WolframKernel` must be available on `PATH`.
+- The Wolfram `LSPServer` paclet must be loadable by
+  `Needs["LSPServer`"]`.
+- Neovim must be recent enough for the current LazyVim and
+  nvim-treesitter setup. This machine is using Neovim 0.12.2.
+
+Mason currently manages editor tools such as `stylua`, `shfmt`, and
+`tree-sitter-cli`; it does not manage `WolframKernel` or `LSPServer`.
+
+## Verification
+
+From `~/.config`:
+
+```sh
+nvim --headless '+Lazy! sync' '+qa'
+nvim --headless '+lua print(vim.filetype.match({ filename = "test.wl" }))' '+qa'
+```
+
+Inside Neovim, open a `.wl` file and check:
+
+```vim
+:set filetype?
+:LspInfo
+:checkhealth lazyvim
+```
+
+For the Wolfram server itself, this command should start without a
+missing-paclet error:
+
+```sh
+WolframKernel -noinit -noprompt -nopaclet -nostartuppaclets -noicon -run 'Needs["LSPServer`"]; Quit[]'
+```
+
+## Known Limitations
+
+- Cross-file `gd` is limited; the current LSPServer behavior does not
+  provide reliable workspace indexing.
+- Tree-sitter support includes `highlights.scm` only. There are no local
+  `locals.scm` or `injections.scm` queries.
+- The tree-sitter parser is old and pinned, so future breakage should be
+  handled conservatively rather than tracking its default branch.
