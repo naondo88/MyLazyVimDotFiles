@@ -84,7 +84,7 @@ return {
         callback = register,
       })
       opts.ensure_installed = opts.ensure_installed or {}
-      if type(opts.ensure_installed) == "table" then
+      if type(opts.ensure_installed) == "table" and not vim.tbl_contains(opts.ensure_installed, "wolfram") then
         table.insert(opts.ensure_installed, "wolfram")
       end
     end,
