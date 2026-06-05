@@ -68,10 +68,36 @@ Lives under the config's own rtp at `queries/wolfram/highlights.scm`
 (the repo ships its queries at the wrong path for nvim to pick up via
 the parser-install dir alone). 94 lines.
 
+### `lua/plugins/edit-review.lua`
+
+New file. The Edit Review feature (in-neovim AI-edit / code-review
+workflow). Adds `sindrets/diffview.nvim` (lazy-loaded on its `Diffview*`
+commands + the `<leader>r` keys), enables `enhanced_diff_hl`, registers
+the `<leader>r` ("+review") which-key group, and on diffview's `config`
+calls `require("edit_review").setup()`. All `<leader>r*` keys delegate to
+`lua/edit_review/`.
+
+### `lua/edit_review/init.lua`
+
+New file. The custom review-tracking layer (diffview is just the viewer).
+UUID-keyed review sessions under `stdpath("state")/edit-review/<proj>/`,
+`meta.json` (JSON via `vim.json`) holding baseA/baseB + content-hashed
+reviewed flags, `report.md` holding per-hunk comments (anchored by HTML
+comment, dynamic backtick fences). Picker is snacks.picker; hunks come
+from gitsigns. See `lua/edit_review/README.md` for keybindings + storage
+format.
+
+### `lua/config/options.lua`
+
+Appends `diffopt` with `algorithm:histogram,linematch:60` (sharper native
+diffs; shared by gitsigns, diffview, and `:diffsplit`). Otherwise stock.
+
 ## Meta files (non-config)
 
 - `MATHEMATICA_LSP.md` — operational notes for the implemented Wolfram
   filetype, Tree-sitter, and LSP setup.
+- `EDIT_VIEWER_SPEC.md` — design spec + decision log for Edit Review.
+- `lua/edit_review/README.md` — Edit Review keybindings + storage format.
 - `MODS.md` — this file.
 - `.codex` — empty marker file (Codex CLI sentinel).
 
