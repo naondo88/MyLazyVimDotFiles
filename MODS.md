@@ -23,9 +23,19 @@ git push origin main --force-with-lease
 
 ### `lua/config/autocmds.lua`
 
-Added a `StripCarriageReturns` autocmd group: on `BufWritePre` for every
-pattern, strips `\r` characters from the buffer while preserving cursor
-position. Everything else in the file is stock LazyVim boilerplate.
+Two additions beyond stock LazyVim boilerplate:
+
+- A `StripCarriageReturns` autocmd group: on `BufWritePre` for every
+  pattern, strips `\r` characters from the buffer while preserving cursor
+  position.
+- An `EditReviewDiffColors` group: a `ColorScheme` autocmd (re-applied on
+  every theme switch, plus once at load) that overrides the native diff
+  highlights `DiffAdd`/`DiffChange`/`DiffDelete`/`DiffText` with louder
+  colors — added=green, deleted=red, changed line=subtle, **changed word
+  (`DiffText`)=vivid amber + bold**. catppuccin (and many themes) paint
+  these so faintly that a one-word edit is nearly invisible; this makes
+  Edit Review's native `:diff` (and all other diffs) legible. Tune the
+  hexes in `override_diff_colors()`.
 
 ### `lua/plugins/orgmode.lua`
 
@@ -70,27 +80,47 @@ the parser-install dir alone). 94 lines.
 
 ### `lua/plugins/edit-review.lua`
 
-New file. The Edit Review feature (in-neovim AI-edit / code-review
-workflow). Adds `sindrets/diffview.nvim` (lazy-loaded on its `Diffview*`
-commands + the `<leader>r` keys), enables `enhanced_diff_hl`, registers
-the `<leader>r` ("+review") which-key group, and on diffview's `config`
-calls `require("edit_review").setup()`. All `<leader>r*` keys delegate to
-`lua/edit_review/`.
+New file. Part of the Edit Review feature (in-neovim AI-edit / code-review
+workflow). Registers the `<leader>r` ("review") which-key group and keeps
+`sindrets/diffview.nvim` installed as an **optional** standalone tool
+(lazy on its `Diffview*` commands, `enhanced_diff_hl` on) — diffview is
+**not** part of the review flow (that uses native `:diff`); it's just there
+for ad-hoc `:DiffviewOpen`. Safe to delete the diffview block if unwanted.
+
+### `lua/config/keymaps.lua`
+
+Beyond the stock LazyVim boilerplate + the `<leader>sa`/`<leader>yc`/`yC`
+helpers, defines the Edit Review `<leader>r*` keymaps. Each lazily
+`require("edit_review")` on first press.
 
 ### `lua/edit_review/init.lua`
 
-New file. The custom review-tracking layer (diffview is just the viewer).
+New file. The review layer. The diff is neovim's **native side-by-side
+`:diff` in the current tab** (no diffview): LEFT = base blob from
+`git show <rev>:<path>` (read-only scratch), RIGHT = the new side (the real
+editable working file for worktree reviews, a read-only B-blob for ranges).
 UUID-keyed review sessions under `stdpath("state")/edit-review/<proj>/`,
-`meta.json` (JSON via `vim.json`) holding baseA/baseB + content-hashed
-reviewed flags, `report.md` holding per-hunk comments (anchored by HTML
-comment, dynamic backtick fences). Picker is snacks.picker; hunks come
-from gitsigns. See `lua/edit_review/README.md` for keybindings + storage
-format.
+deduped per project by base pair. Two kinds: **worktree** (`staged-<uuid>/`,
+HEAD vs working tree, gitsigns hunks) and **committed-range**
+(`range-<uuid>/`, an `A..B`/`A...B` branch / PR / commit range, two SHAs in
+`meta.json`, hunks parsed from `git diff`). `<leader>ro` opens a base
+picker (`choose_base`); `<leader>rl` opens a two-step reflog commit picker
+(`pick_commits`, `git_show` preview). `]c`/`[c`/`]h`/`[h` are rebound
+buffer-locally inside the diff to the native change-jump (centered with
+`zz`); `<leader>uw` toggles wrap on both panes. **Per-hunk review**:
+`<leader>rh` toggles the hunk under the cursor (content-hashed id), shows a
+green `✓` gutter sign, and auto-marks the whole file reviewed once all its
+hunks are. Left pane (old) is colored red, right (new) green via
+per-window `winhighlight`. `meta.json` (JSON via `vim.json`) holds
+kind/baseA/baseB/speckey + content-hashed `reviewed` (file) and
+`reviewed_hunks` maps; `report.md` holds per-hunk comments (anchored by
+HTML comment, dynamic backtick fences). Picker is snacks.picker. See
+`lua/edit_review/README.md` for keybindings + storage format.
 
 ### `lua/config/options.lua`
 
 Appends `diffopt` with `algorithm:histogram,linematch:60` (sharper native
-diffs; shared by gitsigns, diffview, and `:diffsplit`). Otherwise stock.
+diffs; shared by gitsigns and Edit Review's native `:diff`). Otherwise stock.
 
 ## Meta files (non-config)
 

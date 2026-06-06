@@ -10,6 +10,9 @@
 --                          highlighting is far sharper (neovim's newer feature; the
 --                          closest native diff gets to difftastic's token-level clarity).
 --                          60 is the max lines-per-hunk it will try to realign.
+--   followwrap          -> don't force 'wrap' off when entering diff mode; respect
+--                          whatever the window has. Lets Edit Review's both-panes
+--                          word-wrap toggle (<leader>uw inside the diff) stick.
 -- TRYING THIS OUT: evaluate whether linematch alone makes the diffs feel good
 -- before deciding how much we still want difftastic. Tweak/revert freely.
-vim.opt.diffopt:append({ "algorithm:histogram", "linematch:60" })
+vim.opt.diffopt:append({ "algorithm:histogram", "linematch:60", "followwrap" })

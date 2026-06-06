@@ -40,3 +40,27 @@ vim.keymap.set("v", "<leader>yC", function()
   vim.api.nvim_feedkeys(esc, "nx", false)
   vim.notify("Appended context to clipboard")
 end, { desc = "Append context snippet" })
+
+-- Edit Review (lua/edit_review) — in-nvim AI-edit / code-review workflow.
+-- The module is required lazily (only on first keypress). See its README and
+-- EDIT_VIEWER_SPEC.md. The <leader>r group label is registered in
+-- lua/plugins/edit-review.lua.
+local function er(fn)
+  return function()
+    require("edit_review")[fn]()
+  end
+end
+-- stylua: ignore start
+vim.keymap.set("n", "<leader>ro", er("choose_base"),             { desc = "Open review (choose base)" })
+vim.keymap.set("n", "<leader>rl", er("pick_commits"),            { desc = "Review: pick two commits" })
+vim.keymap.set("n", "<leader>rf", er("pick_files"),              { desc = "Review: changed files (picker)" })
+vim.keymap.set("n", "<leader>rn", er("next_unreviewed"),         { desc = "Review: next unreviewed file" })
+vim.keymap.set("n", "<leader>rN", er("prev_unreviewed"),         { desc = "Review: prev unreviewed file" })
+vim.keymap.set("n", "<leader>rm", er("toggle_current_reviewed"), { desc = "Review: mark current file reviewed" })
+vim.keymap.set("n", "<leader>rh", er("toggle_hunk_reviewed"),     { desc = "Review: mark hunk under cursor reviewed" })
+vim.keymap.set("n", "<leader>rc", er("comment"),                 { desc = "Review: comment on hunk under cursor" })
+vim.keymap.set("n", "<leader>rC", er("finish_comment"),          { desc = "Review: finish comment (return to code)" })
+vim.keymap.set("n", "<leader>rg", er("report"),                  { desc = "Review: open report" })
+vim.keymap.set("n", "<leader>rd", er("difftastic"),             { desc = "Review: difftastic structural view" })
+vim.keymap.set("n", "<leader>rq", er("quit"),                    { desc = "Review: quit (close diff split)" })
+-- stylua: ignore end
