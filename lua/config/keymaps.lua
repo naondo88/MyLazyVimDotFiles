@@ -5,6 +5,18 @@
 -- Select all
 vim.keymap.set("n", "<leader>sa", "ggVG", { desc = "Select All" })
 
+-- Yank the current buffer's absolute path to the system clipboard
+vim.keymap.set("n", "<leader>yp", function()
+  local path = vim.api.nvim_buf_get_name(0)
+  if path == "" then
+    vim.notify("Current buffer has no file path", vim.log.levels.WARN)
+    return
+  end
+
+  vim.fn.setreg("+", path)
+  vim.notify("Yanked path: " .. path)
+end, { desc = "Yank buffer path" })
+
 --- Build a markdown context snippet from the visual selection.
 --- Format: [relpath:startline-endline](relpath)\n```ft\n<text>\n```\n\n
 local function build_context_snippet()
