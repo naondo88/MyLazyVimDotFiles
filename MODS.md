@@ -87,6 +87,14 @@ workflow). Registers the `<leader>r` ("review") which-key group and keeps
 **not** part of the review flow (that uses native `:diff`); it's just there
 for ad-hoc `:DiffviewOpen`. Safe to delete the diffview block if unwanted.
 
+### `lua/plugins/snacks-explorer.lua`
+
+New file. Extends LazyVim's default Snacks Explorer (`<leader>e`) with
+`<leader>fD`: exactly one selected explorer file is diffed against the current
+editor file using Edit Review's native side-by-side diff machinery. Terse
+warnings cover no selection, multiple selections, directory selections, and
+unnamed current buffers.
+
 ### `lua/config/keymaps.lua`
 
 Beyond the stock LazyVim boilerplate + the `<leader>sa`/`<leader>yc`/`yC`
@@ -103,7 +111,8 @@ UUID-keyed review sessions under `stdpath("state")/edit-review/<proj>/`,
 deduped per project by base pair. Two kinds: **worktree** (`staged-<uuid>/`,
 HEAD vs working tree, gitsigns hunks) and **committed-range**
 (`range-<uuid>/`, an `A..B`/`A...B` branch / PR / commit range, two SHAs in
-`meta.json`, hunks parsed from `git diff`). `<leader>ro` opens a base
+`meta.json`, hunks parsed from `git diff`). Also exposes a generic real-file
+diff helper used by Snacks Explorer's `<leader>fD`. `<leader>ro` opens a base
 picker (`choose_base`); `<leader>rl` opens a two-step reflog commit picker
 (`pick_commits`, `git_show` preview). `]c`/`[c`/`]h`/`[h` are rebound
 buffer-locally inside the diff to the native change-jump (centered with

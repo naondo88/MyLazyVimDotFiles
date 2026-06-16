@@ -659,6 +659,16 @@ local function clear_diff_maps(buf)
   pcall(vim.keymap.del, "n", "<leader>uw", { buffer = buf })
 end
 
+local function clear_review_maps(r)
+  if not r then
+    return
+  end
+  clear_diff_maps(r.left_buf)
+  if r.right_buf ~= r.left_buf then
+    clear_diff_maps(r.right_buf)
+  end
+end
+
 -- vimdiff aligns panes by *buffer line*, so 'wrap' on only one side instantly
 -- misaligns every long line. Toggle it on BOTH panes together: identical lines
 -- then wrap identically and stay aligned; only genuinely-different lines drift
@@ -726,7 +736,7 @@ local function close_diff()
   if r.left_win and vim.api.nvim_win_is_valid(r.left_win) then
     pcall(vim.api.nvim_win_close, r.left_win, true) -- force-close wipes the scratch
   end
-  clear_diff_maps(r.right_buf) -- scratch left buf is wiped; right may be a real file
+  clear_review_maps(r)
   M._review = nil
 end
 
@@ -843,6 +853,121 @@ function M.open_file(rel)
     end
     vim.cmd("normal! zz")
   end)
+end
+
+local function real_file_from_win(win)
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return nil
+  end
+  local buf = vim.api.nvim_win_get_buf(win)
+  if vim.bo[buf].buftype ~= "" then
+    return nil
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == "" then
+    return nil
+  end
+  return vim.fn.fnamemodify(name, ":p")
+end
+
+--- Open two real files as a native side-by-side diff in the current tab.
+--- LEFT = selected/reference file; RIGHT = current editor file.
+function M.diff_files(left_abs, right_abs)
+  left_abs = left_abs and vim.fn.fnamemodify(left_abs, ":p") or nil
+  right_abs = right_abs and vim.fn.fnamemodify(right_abs, ":p") or nil
+
+  if not right_abs or right_abs == "" or vim.fn.filereadable(right_abs) == 0 then
+    notify("Current buffer has no file", vim.log.levels.WARN)
+    return
+  end
+  if not left_abs or left_abs == "" or vim.fn.filereadable(left_abs) == 0 then
+    notify("Selected item is not a file", vim.log.levels.WARN)
+    return
+  end
+  if left_abs == right_abs then
+    notify("Cannot diff file with itself", vim.log.levels.WARN)
+    return
+  end
+
+  if not M._review then
+    goto_editor_win()
+    M._restore_buf = vim.api.nvim_get_current_buf()
+  end
+  close_diff()
+
+  local right_win = vim.api.nvim_get_current_win()
+  vim.cmd("edit " .. vim.fn.fnameescape(right_abs))
+  local right_buf = vim.api.nvim_get_current_buf()
+
+  vim.cmd("leftabove vsplit " .. vim.fn.fnameescape(left_abs))
+  local left_win = vim.api.nvim_get_current_win()
+  local left_buf = vim.api.nvim_get_current_buf()
+
+  vim.api.nvim_win_call(left_win, function()
+    vim.cmd("diffthis")
+  end)
+  vim.api.nvim_win_call(right_win, function()
+    vim.cmd("diffthis")
+  end)
+
+  define_side_hls()
+  vim.wo[left_win].winhighlight = WINHL_OLD
+  vim.wo[right_win].winhighlight = WINHL_NEW
+  set_diff_maps(left_buf)
+  set_diff_maps(right_buf)
+  for _, b in ipairs({ left_buf, right_buf }) do
+    vim.keymap.set("n", "<leader>uw", function()
+      toggle_review_wrap(left_win, right_win)
+    end, { buffer = b, desc = "Toggle diff word-wrap (both panes)" })
+  end
+
+  vim.api.nvim_set_current_win(right_win)
+  M._review = {
+    kind = "files",
+    left_abs = left_abs,
+    right_abs = right_abs,
+    abs = right_abs,
+    rel = vim.fn.fnamemodify(right_abs, ":."),
+    left_win = left_win,
+    right_win = right_win,
+    left_buf = left_buf,
+    right_buf = right_buf,
+  }
+
+  vim.api.nvim_win_call(right_win, function()
+    vim.cmd("normal! gg")
+    if vim.fn.diff_hlID(vim.fn.line("."), 1) <= 0 then
+      pcall(vim.cmd, "normal! ]c")
+    end
+    vim.cmd("normal! zz")
+  end)
+end
+
+function M.diff_snacks_explorer_selection(picker)
+  local selected = picker:selected()
+
+  if #selected == 0 then
+    notify("Select one file in explorer", vim.log.levels.WARN)
+    return
+  end
+  if #selected > 1 then
+    notify("Select only one file", vim.log.levels.WARN)
+    return
+  end
+  if not selected[1].file or vim.fn.filereadable(selected[1].file) == 0 then
+    notify("Selected item is not a file", vim.log.levels.WARN)
+    return
+  end
+
+  local main = picker.main
+  local current = real_file_from_win(main)
+  if not current then
+    notify("Current buffer has no file", vim.log.levels.WARN)
+    return
+  end
+
+  vim.api.nvim_set_current_win(main)
+  M.diff_files(selected[1].file, current)
 end
 
 function M.quit()

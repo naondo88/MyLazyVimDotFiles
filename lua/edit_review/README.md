@@ -63,6 +63,12 @@ Inside the file picker (`<leader>rf`):
 | `<CR>`  | Open that file's native diff            |
 | `<a-v>` | Mark the file reviewed (drops from list)|
 
+Inside Snacks Explorer (`<leader>e`):
+
+| Key          | Action                                                    |
+| ------------ | --------------------------------------------------------- |
+| `<leader>fD` | Diff the current editor file against one selected file    |
+
 ## Review bases
 
 `<leader>ro` asks what to review. There are two kinds of review, both tracked
