@@ -50,3 +50,35 @@ vim.api.nvim_create_autocmd("ColorScheme", {
   desc = "Brighten native diff highlights (DiffAdd/Change/Delete/Text)",
 })
 override_diff_colors() -- apply to the already-loaded colorscheme
+
+-- Force colored UNDERCURLS (not plain underlines) for LSP diagnostics.
+-- catppuccin compiles its highlights to a cache, and a recompile that happens
+-- during plugin setup() bakes `underline` instead of the configured `undercurl`
+-- (a compile-timing bug — a post-init recompile gets it right, so the result
+-- flip-flops across restarts). Rather than depend on that cache, re-assert
+-- undercurl on every ColorScheme, preserving whatever underline color (`sp`)
+-- the theme chose. Pairs with the tmux Setulc fix that lets SGR 58 reach the
+-- terminal so the curl actually renders red inside tmux.
+local function diagnostic_undercurls()
+  for _, sev in ipairs({ "Error", "Warn", "Info", "Hint", "Ok" }) do
+    local name = "DiagnosticUnderline" .. sev
+    local hl = vim.api.nvim_get_hl(0, { name = name })
+    hl.underline = nil
+    hl.undercurl = true
+    if type(hl.cterm) == "table" then
+      hl.cterm.underline = nil
+      hl.cterm.undercurl = true
+    else
+      hl.cterm = { undercurl = true }
+    end
+    vim.api.nvim_set_hl(0, name, hl)
+  end
+end
+
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("DiagnosticUndercurls", { clear = true }),
+  pattern = "*",
+  callback = diagnostic_undercurls,
+  desc = "Force undercurl (not underline) for DiagnosticUnderline* groups",
+})
+diagnostic_undercurls() -- apply to the already-loaded colorscheme

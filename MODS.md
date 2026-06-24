@@ -23,7 +23,7 @@ git push origin main --force-with-lease
 
 ### `lua/config/autocmds.lua`
 
-Two additions beyond stock LazyVim boilerplate:
+Three additions beyond stock LazyVim boilerplate:
 
 - A `StripCarriageReturns` autocmd group: on `BufWritePre` for every
   pattern, strips `\r` characters from the buffer while preserving cursor
@@ -36,6 +36,37 @@ Two additions beyond stock LazyVim boilerplate:
   these so faintly that a one-word edit is nearly invisible; this makes
   Edit Review's native `:diff` (and all other diffs) legible. Tune the
   hexes in `override_diff_colors()`.
+- A `DiagnosticUndercurls` group: a `ColorScheme` autocmd (re-applied on
+  every theme switch, plus once at load) that forces the
+  `DiagnosticUnderline{Error,Warn,Info,Hint,Ok}` groups to **`undercurl`**
+  instead of `underline`, preserving whatever underline color (`sp`) the
+  theme set. **Why this is needed even though LazyVim already configures
+  `lsp_styles.underlines = undercurl`:** catppuccin compiles its highlights
+  to a bytecode cache (`~/.cache/nvim/catppuccin/<flavour>`). A recompile
+  that happens *during* plugin `setup()` bakes `underline`, while a recompile
+  run *after* full init bakes `undercurl` — a compile-timing bug. The cache
+  is only rebuilt when the config hash changes, so the wrong value gets
+  "stuck" and the curl silently flips to a flat underline across restarts
+  (symptom: red **underline**, not red **undercurl**). Asserting it on every
+  `ColorScheme` sidesteps the cache entirely and is restart-proof. This is
+  the Neovim half of the colored-undercurl fix; the tmux half (passing the
+  SGR 58 underline *color* through tmux) is documented in the tmux repo at
+  `docs/colored-undercurls.md`. Both halves are required for red undercurls
+  inside tmux.
+
+### `lua/plugins/catppuccin.lua`
+
+Sets `flavour = "mocha"` and the LazyVim colorscheme to catppuccin.
+
+**Caveat — the `integrations.native_lsp.underlines` block in this file is a
+no-op.** This version of catppuccin has no `native_lsp` integration at all; it
+reads diagnostic underline styles only from the top-level `lsp_styles.underlines`
+option, which **LazyVim already sets to `undercurl`** (see
+`lazy/LazyVim/lua/lazyvim/plugins/colorscheme.lua`). The `native_lsp` block is
+kept only as a breadcrumb and can be removed. The thing that *actually*
+guarantees undercurl rendering is the `DiagnosticUndercurls` autocmd in
+`lua/config/autocmds.lua` (catppuccin's compiled cache can otherwise revert it to
+a flat underline — see that file's section above).
 
 ### `lua/plugins/orgmode.lua`
 
