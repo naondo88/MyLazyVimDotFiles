@@ -76,3 +76,23 @@ vim.keymap.set("n", "<leader>rg", er("report"),                  { desc = "Revie
 vim.keymap.set("n", "<leader>rd", er("difftastic"),             { desc = "Review: difftastic structural view" })
 vim.keymap.set("n", "<leader>rq", er("quit"),                    { desc = "Review: quit (close diff split)" })
 -- stylua: ignore end
+
+-- Voice dictation (lua/whisper_dictation.lua) — local phrase-on-pause speech to
+-- text. The module is required lazily (only on first use). The <leader>v group
+-- label is registered in lua/plugins/whisper-dictation.lua.
+local function wd(fn)
+  return function()
+    require("whisper_dictation")[fn]()
+  end
+end
+-- stylua: ignore start
+vim.keymap.set("n", "<leader>vo", wd("open"),   { desc = "Voice: open (start recording)" })
+vim.keymap.set("n", "<leader>vc", wd("close"),  { desc = "Voice: close (stop + transcribe)" })
+vim.keymap.set("n", "<leader>va", wd("abort"),  { desc = "Voice: abort (discard)" })
+vim.keymap.set("n", "<leader>vh", wd("health"), { desc = "Voice: health check" })
+-- stylua: ignore end
+
+vim.api.nvim_create_user_command("WhisperDictate", wd("open"), { desc = "Voice: start dictation" })
+vim.api.nvim_create_user_command("WhisperStop", wd("close"), { desc = "Voice: stop dictation" })
+vim.api.nvim_create_user_command("WhisperAbort", wd("abort"), { desc = "Voice: abort dictation" })
+vim.api.nvim_create_user_command("WhisperHealth", wd("health"), { desc = "Voice: health check" })
