@@ -83,6 +83,6 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 })
 diagnostic_undercurls() -- apply to the already-loaded colorscheme
 
--- Python structural overview: zS keeps declarations, signatures, and one
--- meaningful docstring line visible while folding implementation details.
+-- Python/Rust/C/C++ structural overview: zS keeps declarations, signatures,
+-- and one meaningful documentation line while folding implementation details.
 require("smart_overview").setup()

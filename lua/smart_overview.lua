@@ -3,6 +3,13 @@ local M = {}
 local states = {}
 local caches = {}
 
+local supported_filetypes = {
+  c = "c",
+  cpp = "cpp",
+  python = "python",
+  rust = "rust",
+}
+
 local definition_types = {
   function_definition = true,
   class_definition = true,
@@ -45,6 +52,29 @@ local function mark_rows(keep, first_row, last_row)
   for row = first_row, last_row do
     keep[row + 1] = true
   end
+end
+
+local function start_row(node)
+  return select(1, node:range())
+end
+
+local function first_child_of_type(node, types)
+  for child in node:iter_children() do
+    if child:named() and types[child:type()] then
+      return child
+    end
+  end
+end
+
+local function has_descendant(node, types)
+  for child in node:iter_children() do
+    if child:named() then
+      if types[child:type()] or has_descendant(child, types) then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 local function mark_preceding_blank_lines(bufnr, node, keep, limit)
@@ -205,6 +235,412 @@ local function mark_class_members(bufnr, node, keep)
   end
 end
 
+local function meaningful_doc_text(line)
+  local text = line
+    :gsub("^%s*//[/!]%s?", "")
+    :gsub("^%s*/%*+!?%s?", "")
+    :gsub("^%s*%*%s?", "")
+    :gsub("%s*%*/%s*$", "")
+  return text:match("%S") ~= nil
+end
+
+local function is_line_doc(line)
+  return line:match("^%s*//[/!]") ~= nil
+end
+
+local function mark_leading_doc_comment(bufnr, node, keep)
+  local row = start_row(node)
+  if row == 0 then
+    return
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, row, false)
+  local previous = lines[row]
+  if is_line_doc(previous) then
+    local first = row
+    while first > 1 and is_line_doc(lines[first - 1]) do
+      first = first - 1
+    end
+    for line = first, row do
+      if meaningful_doc_text(lines[line]) then
+        keep[line] = true
+        return
+      end
+    end
+    return
+  end
+
+  if not previous:match("%*/%s*$") then
+    return
+  end
+
+  local first = row
+  while first >= 1 and not lines[first]:match("^%s*/%*[%*!]") do
+    first = first - 1
+  end
+  if first < 1 then
+    return
+  end
+
+  for line = first, row do
+    if meaningful_doc_text(lines[line]) then
+      keep[line] = true
+      return
+    end
+  end
+end
+
+local attribute_types = {
+  attribute_declaration = true,
+  attribute_item = true,
+  attribute_specifier = true,
+  inner_attribute_item = true,
+}
+
+local function mark_attributes(bufnr, node, keep)
+  if attribute_types[node:type()] then
+    keep[start_row(node) + 1] = true
+    mark_leading_doc_comment(bufnr, node, keep)
+  end
+  for child in node:iter_children() do
+    if child:named() then
+      mark_attributes(bufnr, child, keep)
+    end
+  end
+end
+
+local function mark_module_doc(bufnr, keep)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for line, text in ipairs(lines) do
+    if is_line_doc(text) then
+      if meaningful_doc_text(text) then
+        keep[line] = true
+        return
+      end
+    elseif text:match("^%s*$") then
+      -- Module documentation may be followed by a blank line.
+    elseif text:match("^%s*/%*[%*!]") then
+      for block_line = line, #lines do
+        if meaningful_doc_text(lines[block_line]) then
+          keep[block_line] = true
+          return
+        end
+        if lines[block_line]:match("%*/") then
+          return
+        end
+      end
+      return
+    else
+      return
+    end
+  end
+end
+
+local function node_is_doc_comment(bufnr, node)
+  if node:type() ~= "comment" and node:type() ~= "line_comment" and node:type() ~= "block_comment" then
+    return false
+  end
+  local row = start_row(node)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
+  return is_line_doc(line) or line:match("^%s*/%*[%*!]") ~= nil
+end
+
+local function mark_scope_spacing(bufnr, children, index, keep, limit)
+  local anchor = children[index]
+  local previous = index - 1
+  while previous >= 1 do
+    local node = children[previous]
+    local _, _, previous_end = node:range()
+    local gap = vim.api.nvim_buf_get_lines(bufnr, previous_end, start_row(anchor), false)
+    local adjacent = true
+    for _, line in ipairs(gap) do
+      if not line:match("%S") then
+        adjacent = false
+        break
+      end
+    end
+    if adjacent and (attribute_types[node:type()] or node_is_doc_comment(bufnr, node)) then
+      anchor = node
+      previous = previous - 1
+    else
+      break
+    end
+  end
+  mark_preceding_blank_lines(bufnr, anchor, keep, limit)
+end
+
+local rust_definition_types = {
+  enum_item = true,
+  foreign_mod_item = true,
+  function_item = true,
+  impl_item = true,
+  mod_item = true,
+  struct_item = true,
+  trait_item = true,
+  union_item = true,
+}
+
+local rust_body_types = {
+  block = true,
+  declaration_list = true,
+  enum_variant_list = true,
+  field_declaration_list = true,
+  ordered_field_declaration_list = true,
+}
+
+local rust_top_line_types = {
+  const_item = true,
+  extern_crate_declaration = true,
+  static_item = true,
+  type_item = true,
+  use_declaration = true,
+}
+
+local rust_member_line_types = {
+  associated_type = true,
+  const_item = true,
+  enum_variant = true,
+  field_declaration = true,
+  static_item = true,
+  type_item = true,
+}
+
+local rust_signature_types = {
+  function_signature_item = true,
+}
+
+local function rust_body(node)
+  return node:field("body")[1] or first_child_of_type(node, rust_body_types)
+end
+
+local function mark_braced_header(node, body, keep)
+  local first = start_row(node)
+  if body then
+    mark_rows(keep, first, start_row(body))
+  else
+    keep[first + 1] = true
+  end
+end
+
+local function walk_rust(bufnr, node, keep)
+  local node_type = node:type()
+  if rust_definition_types[node_type] then
+    mark_braced_header(node, rust_body(node), keep)
+    mark_leading_doc_comment(bufnr, node, keep)
+  elseif rust_signature_types[node_type] then
+    local first, _, last = node:range()
+    mark_rows(keep, first, last)
+    mark_leading_doc_comment(bufnr, node, keep)
+  end
+
+  for child in node:iter_children() do
+    if child:named() then
+      walk_rust(bufnr, child, keep)
+    end
+  end
+end
+
+local function mark_rust_structure(bufnr, root, keep)
+  local function scope(container, line_types, spacing)
+    local children = named_children(container)
+    for index, child in ipairs(children) do
+      local node_type = child:type()
+      if line_types[node_type] or rust_definition_types[node_type] or rust_signature_types[node_type] then
+        mark_scope_spacing(bufnr, children, index, keep, spacing)
+        if line_types[node_type] then
+          keep[start_row(child) + 1] = true
+          mark_leading_doc_comment(bufnr, child, keep)
+        end
+      end
+    end
+
+    if container:type() == "ordered_field_declaration_list" then
+      local previous_row
+      for index, child in ipairs(children) do
+        local row = start_row(child)
+        if not node_is_doc_comment(bufnr, child) and row ~= previous_row then
+          mark_scope_spacing(bufnr, children, index, keep, spacing)
+          keep[row + 1] = true
+          mark_leading_doc_comment(bufnr, child, keep)
+          previous_row = row
+        end
+      end
+    end
+  end
+
+  scope(root, rust_top_line_types, 2)
+
+  local function nested_scopes(node)
+    if node:type() == "mod_item" then
+      local body = rust_body(node)
+      if body then
+        scope(body, rust_top_line_types, 2)
+      end
+    elseif rust_definition_types[node:type()] then
+      local body = rust_body(node)
+      if body then
+        scope(body, rust_member_line_types, 1)
+      end
+    end
+    for child in node:iter_children() do
+      if child:named() then
+        nested_scopes(child)
+      end
+    end
+  end
+
+  nested_scopes(root)
+  walk_rust(bufnr, root, keep)
+  mark_attributes(bufnr, root, keep)
+  mark_module_doc(bufnr, keep)
+end
+
+local cpp_definition_types = {
+  class_specifier = true,
+  enum_specifier = true,
+  function_definition = true,
+  namespace_definition = true,
+}
+
+local cpp_body_types = {
+  compound_statement = true,
+  declaration_list = true,
+  enumerator_list = true,
+  field_declaration_list = true,
+}
+
+local cpp_top_line_types = {
+  alias_declaration = true,
+  declaration = true,
+  import_declaration = true,
+  namespace_alias_definition = true,
+  preproc_def = true,
+  preproc_function_def = true,
+  preproc_include = true,
+  static_assert_declaration = true,
+  type_definition = true,
+  using_declaration = true,
+}
+
+local cpp_member_line_types = {
+  access_specifier = true,
+  alias_declaration = true,
+  declaration = true,
+  enumerator = true,
+  field_declaration = true,
+  static_assert_declaration = true,
+  type_definition = true,
+  using_declaration = true,
+}
+
+local function cpp_body(node)
+  return node:field("body")[1] or first_child_of_type(node, cpp_body_types)
+end
+
+local function cpp_signature_start(node)
+  for child in node:iter_children() do
+    if child:named() and not attribute_types[child:type()] then
+      return start_row(child)
+    end
+  end
+  return start_row(node)
+end
+
+local function cpp_is_method_declaration(node)
+  return (node:type() == "field_declaration" or node:type() == "declaration")
+    and has_descendant(node, { function_declarator = true })
+end
+
+local function mark_cpp_line_or_signature(node, keep)
+  local _, _, last = node:range()
+  local first = cpp_signature_start(node)
+  if cpp_is_method_declaration(node) then
+    mark_rows(keep, first, last)
+  else
+    keep[first + 1] = true
+  end
+end
+
+local function walk_cpp(bufnr, node, keep)
+  local node_type = node:type()
+  if cpp_definition_types[node_type] then
+    local body = cpp_body(node)
+    local first = cpp_signature_start(node)
+    if body then
+      mark_rows(keep, first, start_row(body))
+    else
+      keep[first + 1] = true
+    end
+    mark_leading_doc_comment(bufnr, node, keep)
+  elseif node_type == "template_declaration" then
+    local declaration
+    for child in node:iter_children() do
+      if child:named() and (cpp_definition_types[child:type()] or cpp_top_line_types[child:type()]) then
+        declaration = child
+        break
+      end
+    end
+    if declaration then
+      mark_rows(keep, start_row(node), math.max(start_row(node), start_row(declaration) - 1))
+    else
+      keep[start_row(node) + 1] = true
+    end
+    mark_leading_doc_comment(bufnr, node, keep)
+  end
+
+  for child in node:iter_children() do
+    if child:named() then
+      walk_cpp(bufnr, child, keep)
+    end
+  end
+end
+
+local function mark_cpp_structure(bufnr, root, keep)
+  local function scope(container, line_types, spacing)
+    local children = named_children(container)
+    for index, child in ipairs(children) do
+      local node_type = child:type()
+      if
+        line_types[node_type]
+        or cpp_definition_types[node_type]
+        or node_type == "template_declaration"
+      then
+        mark_scope_spacing(bufnr, children, index, keep, spacing)
+        if line_types[node_type] then
+          mark_cpp_line_or_signature(child, keep)
+          mark_leading_doc_comment(bufnr, child, keep)
+        end
+      end
+    end
+  end
+
+  scope(root, cpp_top_line_types, 2)
+
+  local function nested_scopes(node)
+    if node:type() == "class_specifier" or node:type() == "enum_specifier" then
+      local body = cpp_body(node)
+      if body then
+        scope(body, cpp_member_line_types, 1)
+      end
+    elseif node:type() == "namespace_definition" then
+      local body = cpp_body(node)
+      if body then
+        scope(body, cpp_top_line_types, 2)
+      end
+    end
+    for child in node:iter_children() do
+      if child:named() then
+        nested_scopes(child)
+      end
+    end
+  end
+
+  nested_scopes(root)
+  walk_cpp(bufnr, root, keep)
+  mark_attributes(bufnr, root, keep)
+  mark_module_doc(bufnr, keep)
+end
+
 local function levels_from_keep(line_count, keep)
   local levels = {}
   for line = 1, line_count do
@@ -238,24 +674,37 @@ end
 
 local function build_cache(bufnr)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr, "python")
+  local filetype = vim.bo[bufnr].filetype
+  local language = supported_filetypes[filetype]
+  if not language then
+    return nil, ("Smart Overview does not support %s files"):format(filetype ~= "" and filetype or "untyped")
+  end
+
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr, language)
   if not ok or not parser then
-    return nil, "Python Treesitter parser is unavailable"
+    return nil, ("%s Tree-sitter parser is unavailable"):format(language)
   end
 
   local trees = parser:parse()
   local root = trees[1] and trees[1]:root()
   if not root then
-    return nil, "Python Treesitter parser returned no syntax tree"
+    return nil, ("%s Tree-sitter parser returned no syntax tree"):format(language)
   end
 
   local keep = {}
-  mark_top_level(bufnr, root, keep)
-  mark_class_members(bufnr, root, keep)
-  walk_definitions(bufnr, root, keep)
+  if language == "python" then
+    mark_top_level(bufnr, root, keep)
+    mark_class_members(bufnr, root, keep)
+    walk_definitions(bufnr, root, keep)
+  elseif language == "rust" then
+    mark_rust_structure(bufnr, root, keep)
+  elseif language == "c" or language == "cpp" then
+    mark_cpp_structure(bufnr, root, keep)
+  end
 
   local cache = {
     changedtick = vim.api.nvim_buf_get_changedtick(bufnr),
+    language = language,
     levels = levels_from_keep(line_count, keep),
   }
   caches[bufnr] = cache
@@ -266,7 +715,8 @@ function M.foldexpr()
   local bufnr = vim.api.nvim_get_current_buf()
   local cache = caches[bufnr]
   local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-  if not cache or cache.changedtick ~= changedtick then
+  local language = supported_filetypes[vim.bo[bufnr].filetype]
+  if not cache or cache.changedtick ~= changedtick or cache.language ~= language then
     cache = build_cache(bufnr)
   end
   return cache and cache.levels[vim.v.lnum] or 0
@@ -302,8 +752,14 @@ function M.toggle()
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
-  if vim.bo[bufnr].filetype ~= "python" then
-    vim.notify("Smart Overview currently supports Python buffers only", vim.log.levels.WARN)
+  if not supported_filetypes[vim.bo[bufnr].filetype] then
+    local filetype = vim.bo[bufnr].filetype
+    vim.notify(
+      ("Smart Overview supports Python, Rust, C, and C++; got %s"):format(
+        filetype ~= "" and filetype or "an untyped buffer"
+      ),
+      vim.log.levels.WARN
+    )
     return
   end
 
@@ -333,20 +789,11 @@ end
 
 function M.setup()
   vim.api.nvim_create_user_command("SmartOverview", M.toggle, {
-    desc = "Toggle the Python smart structural overview",
+    desc = "Toggle the smart structural overview",
   })
 
   local group = vim.api.nvim_create_augroup("SmartOverview", { clear = true })
-  vim.api.nvim_create_autocmd("FileType", {
-    group = group,
-    pattern = "python",
-    callback = function(event)
-      vim.keymap.set("n", "zS", M.toggle, {
-        buffer = event.buf,
-        desc = "Toggle smart structural overview",
-      })
-    end,
-  })
+  vim.keymap.set("n", "zS", M.toggle, { desc = "Toggle smart structural overview" })
 
   vim.api.nvim_create_autocmd("BufWinLeave", {
     group = group,
@@ -372,15 +819,6 @@ function M.setup()
       states[tonumber(event.match)] = nil
     end,
   })
-
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].filetype == "python" then
-      vim.keymap.set("n", "zS", M.toggle, {
-        buffer = bufnr,
-        desc = "Toggle smart structural overview",
-      })
-    end
-  end
 end
 
 return M
