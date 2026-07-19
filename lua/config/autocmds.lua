@@ -82,3 +82,7 @@ vim.api.nvim_create_autocmd("ColorScheme", {
   desc = "Force undercurl (not underline) for DiagnosticUnderline* groups",
 })
 diagnostic_undercurls() -- apply to the already-loaded colorscheme
+
+-- Python structural overview: zS keeps declarations, signatures, and one
+-- meaningful docstring line visible while folding implementation details.
+require("smart_overview").setup()
